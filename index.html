@@ -123,6 +123,33 @@
   .box.open .lid{ transform:translateY(-46px) rotate(-14deg); opacity:0; }
   .box.open .bow{ opacity:0; transition:opacity .3s; }
 
+  /* drumroll suspense: chosen box trembles + glows, others fade back */
+  .box.drumroll{ animation:tremble .07s linear infinite, glow .32s ease-in-out infinite alternate; z-index:5; }
+  @keyframes tremble{
+    0%,100%{transform:translate(0,0) rotate(0);}
+    25%{transform:translate(-2px,1px) rotate(-4deg);}
+    50%{transform:translate(2px,-1px) rotate(4deg);}
+    75%{transform:translate(-1px,2px) rotate(-2deg);}
+  }
+  @keyframes glow{
+    from{ filter:drop-shadow(0 0 3px rgba(240,198,116,.45)); }
+    to{ filter:drop-shadow(0 0 22px rgba(240,198,116,.95)); }
+  }
+  .box.dim{ opacity:.22; transform:scale(.82); }
+
+  /* ---------- money fake-out screen ---------- */
+  .money{
+    font-family:"Fraunces", Georgia, serif; font-weight:600;
+    font-size:clamp(46px, 16vw, 76px); line-height:1;
+    color:var(--gold); letter-spacing:-.02em; margin:18px 0 6px;
+    text-shadow:0 6px 34px rgba(240,198,116,.55);
+    animation:moneyPop .6s cubic-bezier(.2,1.5,.4,1) both;
+  }
+  @keyframes moneyPop{ 0%{opacity:0; transform:scale(.5);} 100%{opacity:1; transform:scale(1);} }
+  .money-emoji{ font-size:40px; margin-bottom:2px; animation:moneyPop .5s .1s both; }
+  .coin{ position:fixed; top:-40px; z-index:48; pointer-events:none; font-size:26px; will-change:transform; }
+  @keyframes coinFall{ 0%{ transform:translateY(0) rotate(0); opacity:0; } 8%{opacity:1;} 100%{ transform:translateY(112vh) rotate(360deg); opacity:1; } }
+
   /* ---------- reveal card ---------- */
   .reveal{
     margin:26px auto 0; width:100%;
@@ -186,6 +213,8 @@
 
   @media (prefers-reduced-motion: reduce){
     .box.shuffling{ animation:none; }
+    .box.drumroll{ animation:glow .4s ease-in-out infinite alternate; }
+    .money{ animation:none; }
     .reveal, .screen{ animation:none; }
   }
 </style>
@@ -219,7 +248,7 @@
     <div class="reveal">
       <div class="art" id="art-joji"></div>
       <div class="label">
-        <div class="tag">Tu vinnēji · Galvenā balva</div>
+        <div class="tag">Apsveicu Tu vinēji</div>
         <h2 class="prize">Ceļojums uz Joji koncertu 🎤</h2>
         <p class="note">Tikai tu, es un Joji, kas dzied skumjas dziesmas un vēl 10 000 cilvēku. Jāsāk plānot kā tur tiksim (:</p>
       </div>
@@ -229,12 +258,22 @@
     </div>
   </section>
 
+  <!-- SCREEN 2.5 — money fake-out -->
+  <section class="screen" id="screen-money">
+    <div class="money-emoji">💶🤑💶</div>
+    <div class="money" id="moneyNum">100 000 €</div>
+    <p class="sub">tik daudz naudas omg</p>
+    <div class="stack">
+      <button class="btn" id="toLotteryReveal">tiešām 100 000 euro varēja vinēt? →</button>
+    </div>
+  </section>
+
   <!-- SCREEN 3 — Lottery -->
   <section class="screen" id="screen-lottery">
     <div class="reveal">
       <div class="art" id="art-lottery"></div>
       <div class="label">
-        <div class="tag">Gandrīz jau</div>
+        <div class="tag">Jā, iespēja bija vinēt iespēju vinēt 100 000 euro 😂</div>
         <h2 class="prize">Latvijas Simtgades loterija</h2>
         <p class="note">Viena skrāpējamā biļete. Izredzes vinnēt džekpotu? Aptuveni tādas pašas kā iespēja, ka es pats savākšu netīrās drēbes no palodzes. Bez atgādinājuma.</p>
       </div>
@@ -305,6 +344,83 @@ function chime(win){
       o.start(t); o.stop(t+0.55);
     });
   }catch(e){}
+}
+
+/* ---------- drumroll + crash (synthesised snare, no audio files) ---------- */
+let _noise;
+function ensureCtx(){ audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); return audioCtx; }
+function noiseBuf(){
+  if(_noise) return _noise;
+  const len = Math.floor(audioCtx.sampleRate * 1.1);
+  _noise = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const d = _noise.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = Math.random()*2 - 1;
+  return _noise;
+}
+function snareHit(t, gain){
+  const src = audioCtx.createBufferSource(); src.buffer = noiseBuf();
+  const bp = audioCtx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1900; bp.Q.value=0.7;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+0.055);
+  src.connect(bp); bp.connect(g); g.connect(audioCtx.destination);
+  src.start(t); src.stop(t+0.07);
+}
+function crash(t){
+  const src = audioCtx.createBufferSource(); src.buffer = noiseBuf();
+  const hp = audioCtx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=5000;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.4, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+0.9);
+  src.connect(hp); hp.connect(g); g.connect(audioCtx.destination);
+  src.start(t); src.stop(t+1.0);
+}
+// accelerating roll for `dur` seconds; returns when it should visually resolve
+function drumroll(dur){
+  try{
+    ensureCtx();
+    const now = audioCtx.currentTime;
+    const step = 0.05;                       // 20 hits/sec
+    const total = Math.floor(dur/step);
+    for(let i=0;i<total;i++){
+      const prog = i/total;
+      snareHit(now + i*step, 0.05 + prog*0.22); // crescendo
+    }
+    crash(now + dur);
+  }catch(e){}
+}
+// bright "cha-ching" for the money screen
+function cashDing(){
+  try{
+    ensureCtx();
+    const now = audioCtx.currentTime;
+    [1318.5, 1760, 2093].forEach((f,i)=>{
+      const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+      o.type='triangle'; o.frequency.value=f;
+      const t = now + i*0.07;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.2, t+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.4);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t); o.stop(t+0.45);
+    });
+  }catch(e){}
+}
+
+/* ---------- coin rain (money screen) ---------- */
+function coinRain(n){
+  const coins = ['💶','💰','🤑','💸','🪙'];
+  for(let i=0;i<n;i++){
+    const c = document.createElement('div');
+    c.className = 'coin';
+    c.textContent = coins[i % coins.length];
+    c.style.left = (Math.random()*94) + 'vw';
+    const dur = 2.4 + Math.random()*2.2;
+    c.style.animation = 'coinFall ' + dur + 's linear forwards';
+    c.style.animationDelay = (Math.random()*0.9) + 's';
+    document.body.appendChild(c);
+    setTimeout(()=>c.remove(), (dur+1)*1000);
+  }
 }
 
 /* ---------- confetti ---------- */
@@ -416,6 +532,7 @@ document.getElementById('art-bmw').innerHTML =
 const screens = {
   choose: document.getElementById('screen-choose'),
   joji: document.getElementById('screen-joji'),
+  money: document.getElementById('screen-money'),
   lottery: document.getElementById('screen-lottery'),
   bmw: document.getElementById('screen-bmw'),
 };
@@ -434,7 +551,7 @@ function pickBox(winner){
   boxEls.forEach(b=> b.style.pointerEvents = 'none');
   haptic();
 
-  // shuffle: jiggle all boxes, swap their visual order a few times
+  // 1) shuffle: jiggle all boxes, swap their visual order a few times
   boxEls.forEach(b=>b.classList.add('shuffling'));
   let swaps = 0;
   const swapper = setInterval(()=>{
@@ -444,28 +561,58 @@ function pickBox(winner){
     if(++swaps >= 6){
       clearInterval(swapper);
       boxEls.forEach(b=>b.classList.remove('shuffling'));
+
+      // 2) DRUMROLL: dim the others, tremble + glow the chosen box, roll builds
+      const ROLL = 1700; // ms
+      boxEls.forEach(b=> b.classList.add(b===winner ? 'drumroll' : 'dim'));
+      drumroll(ROLL/1000);
+      const buzz = setInterval(haptic, 90); // rapid taptic ticks under the roll
+
+      // 3) CRASH + reveal, synced to the end of the roll
       setTimeout(()=>{
+        clearInterval(buzz);
+        boxEls.forEach(b=> b.classList.remove('drumroll','dim'));
         winner.classList.add('open');
         haptic();
         chime(true);
-        burstConfetti(160);
-        releaseBalloons(14);
+        burstConfetti(180);
+        releaseBalloons(16);
         setTimeout(()=>{ show('joji'); busy = false; }, 780);
-      }, 260);
+      }, ROLL);
     }
   }, 190);
 }
 
 boxEls.forEach(b=> b.addEventListener('click', ()=> pickBox(b)) );
 
+// count-up animation for the money number
+function countUp(el, target, dur){
+  const start = performance.now();
+  (function frame(t){
+    const p = Math.min(1, (t-start)/dur);
+    const val = Math.floor((1-Math.pow(1-p,3)) * target);
+    el.textContent = val.toLocaleString('lv-LV') + ' €';
+    if(p<1) requestAnimationFrame(frame); else el.textContent = '100 000 €';
+  })(start);
+}
+
+// Joji screen → fake-out money screen
 document.getElementById('toLottery').addEventListener('click', ()=>{
-  haptic(); chime(true); burstConfetti(70); show('lottery');
+  haptic(); cashDing(); burstConfetti(90); coinRain(24);
+  show('money');
+  const num = document.getElementById('moneyNum');
+  num.textContent = '0 €';
+  countUp(num, 100000, 1200);
+});
+// money screen → the punchline: it was just a lottery ticket
+document.getElementById('toLotteryReveal').addEventListener('click', ()=>{
+  haptic(); chime(false); show('lottery');
 });
 document.getElementById('toBmw').addEventListener('click', ()=>{
   haptic(); chime(false); show('bmw');           // the "joke" prize — a wry sound, no party
 });
 document.getElementById('replayBtn').addEventListener('click', ()=>{
-  boxEls.forEach(b=>{ b.classList.remove('open'); b.style.order = ''; b.style.pointerEvents = ''; });
+  boxEls.forEach(b=>{ b.classList.remove('open','drumroll','dim'); b.style.order = ''; b.style.pointerEvents = ''; });
   show('choose');
 });
 
